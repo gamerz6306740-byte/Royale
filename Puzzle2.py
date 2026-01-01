@@ -10,338 +10,163 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from aiohttp import web
 
-# ================= HARDCODED CONFIG =================
-
-JSON_URL = "https://gist.githubusercontent.com/a94154858/b60b9dea6eab34ef1e87f069282dcf95/raw/07f0ed705ed98b8bb5331f897c717e9cca9b7c80/Ali.json"
-
-FIREBASE_KEY = "AIzaSyAkSwrPZkuDYUGWU65NAVtbidYzE5ydIJ4"
-PROJECT_ID = "cash-rhino"
-
-REFRESH_TOKEN = (
-    "AMf-vByShuybtTRFrS35tBsiejnoFbyvCgZFRIXiSVbd_VVAS9br0GRYC0rlZF2bodGPsn-gJwpbFAA3pZ96h6xPUW9WV49uOIWnchn-ca7DcBJIGg3HvaQ-jWVQmcLs6FKiFgJ_B5Uwirv5VkBV-SScFX4uY9VMAJdlRwXewI6CxmI1-xYosj-d8aPHq_PAPwdgtTG6AMJOGFdFGf4YEetR5DMoeLl8H4Pmf_adVVSIr8pk1S-1gNlmvcaRQP7J0GZa0MzBFRk7mVok1kBABLRjVn0cru3Vxe38xOcVW-YRhBzL-uZRK5WFnCXTnRShDoEGuS_reOu9vkDRT4DCMz4PInrPtnG_z0Rmi-EESdXN2oXRhLuIei2r7gs2ZYsJAPUZNZr38z9DbNWNPpCo21FJNks0jspYCAdfctc74vZgwZmdWUmz2j5_xImoGUgLT7Oe5Si90NWH"
-)
+# ================= UPDATED CASH PANDA CONFIG (cash-panda-76893) =================
+JSON_URL = "https://gist.githubusercontent.com/gamerz6306740-byte/ce8d2837b315b80392fba7fe791150a3/raw/06595419a9886fd2a08279bb910c3e6ee974e3a5/Anccgaj.json"
+FIREBASE_KEY = "AIzaSyAMQu13Wg_7UnuwSstH6JKfh37VIEZ4bGg"
+PROJECT_ID = "cash-panda-76893"
+REFRESH_TOKEN = "AMf-vBzRDoETXA6y7BD0CfoeA-XvzeSBgNvXKDYSAjIO8UP0dpYxzfzLZkVIbejjel0ciaUSHyywuGU4-d9uCwWfGs2gLCNSetxlOtZY3HrNZwKZXvjpgMU8MTGedxCI7Dwt0dJdDBqBwxjvxZAkVI9RmGg9hmt7eP4tYmpoyd1ujIYbGlH9xqXv8GCLozBEOgOicI6BJ-nl_qEYH5PUsCudn0cj5_LXzSaYed6XPGb3LhA2Pa2vxr16ZDxvSestxB2qbQm3ignTSElW_5AtR0-x3RUo913ameRfgQwC4I0porPjpQsJULjrly67GFJsjzvrZd8CbEXXh9BLE6AQzRhgRvAR1db2CWJjIME6F8SIMR-zmnuNKgvZgS_V8cZrlTj_OlKmHjBe3gc8F2KXVSnKFauB46_Xf3WigQ7ryTMlHTZ2hVNOCq8"
+SPOT_ID = "2759528"
 
 BASE_URL = "https://fairbid.inner-active.mobi/simpleM2M/fyberMediation"
-SPOT_ID = "2555632"
 SALT = "j8n5HxYA0ZVF"
-
 ENCRYPTION_KEY = "6fbJwIfT6ibAkZo1VVKlKVl8M2Vb7GSs"
+PORT = int(os.getenv("PORT", 10000)) 
 
-REQUEST_TIMEOUT = 30
-PORT = int(os.getenv("PORT", 10000))
-
-# ====================================================
-
-_last_timestamp = 0
-_processed_offers = set()
-_stats = {
-    "start_time": time.time(),
-    "status": "running"
-}
-
-# ---------------- LOG ---------------- #
+# ---------------- INTERNAL GLOBALS ---------------- #
+_last_ts = 0
+_stats = {"start_time": time.time(), "boosts_count": 0, "status": "Initializing"}
 
 def log(msg: str):
-    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{timestamp}] {msg}", flush=True)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [BOT] {msg}", flush=True)
 
-# ---------------- HTTP SERVER (Keep-Alive) ---------------- #
-
-async def health_check(request):
-    uptime = int(time.time() - _stats["start_time"])
-    hours = uptime // 3600
-    minutes = (uptime % 3600) // 60
-    
-    return web.json_response({
-        "status": "running",
-        "uptime": f"{hours}h {minutes}m"
-    })
-
-async def start_http_server():
-    app = web.Application()
-    app.router.add_get("/", health_check)
-    app.router.add_get("/health", health_check)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    log(f"[HTTP] Health check server running on port {PORT}")
-
-# ---------------- CLIENT ---------------- #
-
-async def create_client():
-    return httpx.AsyncClient(
-        http2=True,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Android)",
-            "Accept": "application/json",
-        },
-        timeout=httpx.Timeout(REQUEST_TIMEOUT),
-        verify=False,
-    )
-
-# ---------------- LOAD CONFIG FROM URL ---------------- #
-
-async def load_config(client):
-    log("[CONFIG] Fetching JSON data from URL...")
-    try:
-        r = await client.get(JSON_URL)
-        r.raise_for_status()
-        data = r.json()
-        
-        user_id = data["client_params"]["publisher_supplied_user_id"]
-        log(f"[CONFIG] Loaded config for user: {user_id}")
-        
-        return {
-            "user_id": user_id,
-            "payload": json.dumps(data, separators=(",", ":")),
-        }
-    except Exception as e:
-        log(f"[CONFIG] Failed to load config: {e}")
-        raise
-
-# ---------------- AUTH ---------------- #
-
-async def get_id_token(client):
-    r = await client.post(
-        f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_KEY}",
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": REFRESH_TOKEN
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    r.raise_for_status()
-    j = r.json()
-    return j["id_token"], j["user_id"], int(j["expires_in"])
-
-class TokenManager:
-    def __init__(self):
-        self.token = None
-        self.uid = None
-        self.expiry = 0
-
-    async def get(self, client):
-        if not self.token or time.time() >= self.expiry:
-            self.token, self.uid, ttl = await get_id_token(client)
-            self.expiry = time.time() + ttl - 30
-            log(f"[AUTH] Token refreshed (valid ~{ttl//60} min)")
-        return self.token, self.uid
-
-# ---------------- HASH (FAIRBID) ---------------- #
-
+# ---------------- CRYPTO & HASHING ---------------- #
 def build_hash_payload(user_id, url):
-    global _last_timestamp
+    global _last_ts
+    now = max(int(time.time()), _last_ts + 1)
+    _last_ts = now
+    ts_str = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    raw = f"{url}{ts_str}{SALT}"
+    return json.dumps({
+        "user_id": user_id,
+        "timestamp": now,
+        "hash_value": hashlib.sha512(raw.encode()).hexdigest(),
+    }, separators=(",", ":"))
 
-    now = int(time.time())
-    if now <= _last_timestamp:
-        now = _last_timestamp + 1
-    _last_timestamp = now
-
-    ts = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    raw = f"{url}{ts}{SALT}"
-
-    return json.dumps(
-        {
-            "user_id": user_id,
-            "timestamp": now,
-            "hash_value": hashlib.sha512(raw.encode()).hexdigest(),
-        },
-        separators=(",", ":"),
-    )
-
-# ---------------- ENCRYPTION ---------------- #
-
-def encrypt_offer(offer_id):
+def encrypt_offer_data(offer_id):
     key = hashlib.sha256(ENCRYPTION_KEY.encode()).digest()
     raw = json.dumps({"offerId": offer_id}, separators=(",", ":")).encode()
     cipher = AES.new(key, AES.MODE_ECB)
-    enc = cipher.encrypt(pad(raw, AES.block_size))
-    return {"data": {"data": base64.b64encode(enc).decode()}}
+    return {"data": {"data": base64.b64encode(cipher.encrypt(pad(raw, 16))).decode()}}
 
-# ---------------- FIRESTORE ---------------- #
+# ---------------- TOKEN MANAGER ---------------- #
+class TokenManager:
+    def __init__(self):
+        self.token, self.uid, self.expiry = None, None, 0
 
-async def get_super_offer(client, token, uid):
+    async def get(self, client):
+        if not self.token or time.time() >= self.expiry:
+            r = await client.post(f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_KEY}",
+                data={"grant_type": "refresh_token", "refresh_token": REFRESH_TOKEN})
+            r.raise_for_status()
+            j = r.json()
+            self.token, self.uid = j["id_token"], j["user_id"]
+            self.expiry = time.time() + int(j["expires_in"]) - 60
+            log(f"🔑 Auth Refreshed: {self.uid}")
+        return self.token, self.uid
+
+# ---------------- BOOST LOGIC ---------------- #
+async def run_boost(client, user_id, payload_str):
     try:
-        r = await client.post(
-            f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
-            f"/databases/(default)/documents/users/{uid}:runQuery",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "structuredQuery": {
-                    "from": [{"collectionId": "superOffers"}],
-                    "where": {
-                        "fieldFilter": {
-                            "field": {"fieldPath": "status"},
-                            "op": "NOT_EQUAL",
-                            "value": {"stringValue": "COMPLETED"}
-                        }
-                    },
-                    "limit": 1
-                }
-            }
-        )
-
-        for item in r.json():
-            doc = item.get("document")
-            if not doc:
-                continue
-
-            f = doc["fields"]
-            offer_id = f["offerId"]["stringValue"]
-
-            if offer_id in _processed_offers:
-                return None
-
-            return {
-                "offerId": offer_id,
-                "reward": int(f.get("rewardAmount", {}).get("integerValue", 0)),
-                "fees": int(f.get("fees", {}).get("integerValue", 0)),
-            }
-    except Exception as e:
-        log(f"[FIRESTORE] Error getting offer: {e}")
-    
-    return None
-
-async def get_boosts(client, token, uid):
-    try:
-        r = await client.get(
-            f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
-            f"/databases/(default)/documents/users/{uid}?mask.fieldPaths=boosts",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-
-        if r.status_code != 200:
-            return 0
-
-        return int(
-            r.json()
-            .get("fields", {})
-            .get("boosts", {})
-            .get("integerValue", 0)
-        )
-    except Exception:
-        return 0
-
-# ---------------- FAIRBID (SILENT) ---------------- #
-
-async def run_fairbid(client, cfg):
-    try:
-        r = await client.post(f"{BASE_URL}?spotId={SPOT_ID}", content=cfg["payload"])
-        if r.status_code >= 400:
-            return
-
+        r = await client.post(f"{BASE_URL}?spotId={SPOT_ID}", content=payload_str)
         text = r.text
-        
-        # Parse impression URL
-        try:
-            if "impression" in text and 'impression":"' in text:
-                parts = text.split('impression":"')
-                if len(parts) > 1:
-                    impression_url = parts[1].split('"')[0]
-                    if impression_url.startswith('http'):
-                        await client.get(impression_url)
-        except Exception:
-            pass
-        
-        # Parse completion URL
-        try:
-            if "completion" in text and 'completion":"' in text:
-                parts = text.split('completion":"')
-                if len(parts) > 1:
-                    comp = parts[1].split('"')[0]
-                    if comp.startswith('http'):
-                        await client.post(comp, content=build_hash_payload(cfg["user_id"], comp))
-        except Exception:
-            pass
-            
-    except Exception:
-        pass
+        if '"completion":"' in text:
+            comp_url = text.split('"completion":"')[1].split('"')[0]
+            # Ping Impression
+            if '"impression":"' in text:
+                imp_url = text.split('"impression":"')[1].split('"')[0]
+                await client.get(imp_url)
+            # Ping Completion with Hash
+            await client.post(comp_url, content=build_hash_payload(user_id, comp_url))
+            _stats["boosts_count"] += 1
+            return True
+    except: pass
+    return False
 
-# ---------------- UNLOCK / CLAIM ---------------- #
-
-async def call_fn(client, token, name, offer_id):
-    try:
-        r = await client.post(
-            f"https://us-central1-{PROJECT_ID}.cloudfunctions.net/{name}",
-            headers={"Authorization": f"Bearer {token}"},
-            json=encrypt_offer(offer_id)
-        )
-        return r.json()
-    except Exception:
-        return {}
-
-async def unlock_and_claim(client, token, offer):
-    unlock = await call_fn(client, token, "superOffer_unlock", offer["offerId"])
-    if unlock.get("result", {}).get("status") != "SUCCESS":
-        return False
-
-    claim = await call_fn(client, token, "superOffer_claim", offer["offerId"])
-    return claim.get("result", {}).get("status") == "SUCCESS"
-
-# ---------------- MAIN LOOP ---------------- #
-
+# ---------------- BOT LOOP ---------------- #
 async def bot_loop():
-    """Main bot logic"""
-    client = await create_client()
-    
-    try:
-        cfg = await load_config(client)
+    _stats["status"] = "Running"
+    async with httpx.AsyncClient(http2=True, timeout=30, verify=False) as client:
+        # Load Config with Retry
+        cfg_data = None
+        while not cfg_data:
+            try:
+                resp = await client.get(JSON_URL)
+                cfg_data = resp.json()
+                log("📡 Configuration loaded successfully")
+            except:
+                log("⚠️ Config load failed, retrying in 10s...")
+                await asyncio.sleep(10)
+        
+        user_id = cfg_data["client_params"]["publisher_supplied_user_id"]
+        payload_str = json.dumps(cfg_data, separators=(",", ":"))
         tm = TokenManager()
-
-        log("[BOT] Starting optimized async bot with HTTP/2 and encryption")
-        log(f"[BOT] User ID: {cfg['user_id']}")
 
         while True:
             try:
                 token, uid = await tm.get(client)
-
-                offer = await get_super_offer(client, token, uid)
-                if not offer:
-                    await asyncio.sleep(5)
+                
+                # Check Firestore for offers
+                q_url = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/users/{uid}:runQuery"
+                r = await client.post(q_url, headers={"Authorization": f"Bearer {token}"},
+                    json={"structuredQuery": {"from": [{"collectionId": "superOffers"}],
+                          "where": {"fieldFilter": {"field": {"fieldPath": "status"}, "op": "NOT_EQUAL", "value": {"stringValue": "COMPLETED"}}},
+                          "limit": 1}})
+                
+                res = r.json()
+                if not res or "document" not in res[0]:
+                    _stats["status"] = "Waiting for offers"
+                    await asyncio.sleep(60)
                     continue
 
-                log(f"[OFFER] Found offer {offer['offerId']} - Reward: {offer['reward']}, Fees: {offer['fees']}")
+                f = res[0]["document"]["fields"]
+                offer_id = f["offerId"]["stringValue"]
+                fees = int(f.get("fees", {}).get("integerValue", 0))
+                log(f"🎯 Target Offer: {offer_id} | Need {fees} Boosts")
+
+                # Boost Farming
+                _stats["status"] = f"Farming {offer_id}"
+                for i in range(fees + 1):
+                    await run_boost(client, user_id, payload_str)
+                    if i % 5 == 0: log(f"📤 Boost Progress: {i}/{fees}")
+                    await asyncio.sleep(0.5)
+
+                # Unlock & Claim
+                _stats["status"] = f"Claiming {offer_id}"
+                for action in ["superOffer_unlock", "superOffer_claim"]:
+                    await client.post(f"https://us-central1-{PROJECT_ID}.cloudfunctions.net/{action}",
+                        headers={"Authorization": f"Bearer {token}"}, json=encrypt_offer_data(offer_id))
                 
-                target = offer["fees"] + 1
-
-                while True:
-                    boosts = await get_boosts(client, token, uid)
-                    if boosts >= target:
-                        break
-                    await run_fairbid(client, cfg)
-                    await asyncio.sleep(0.3)
-
-                if await unlock_and_claim(client, token, offer):
-                    log(
-                        f"✅ [CLAIMED] Offer: {offer['offerId']} "
-                        f"| Reward: {offer['reward']} | Fees: {offer['fees']}"
-                    )
-                else:
-                    log(f"❌ [FAILED] Could not claim offer {offer['offerId']}")
-
-                _processed_offers.add(offer["offerId"])
-                await asyncio.sleep(1)
+                log(f"💰 Success! {offer_id} claimed.")
+                await asyncio.sleep(30)
 
             except Exception as e:
-                log(f"[ERROR] Bot loop error: {e}")
-                await asyncio.sleep(10)
+                log(f"⚠️ Loop Error: {e}")
+                await asyncio.sleep(20)
 
-    except Exception as e:
-        log(f"[FATAL] Bot initialization failed: {e}")
-        raise
-    finally:
-        await client.aclose()
+# ---------------- RENDER WEB SERVER ---------------- #
+async def health_check(request):
+    uptime = int(time.time() - _stats["start_time"])
+    return web.json_response({
+        "bot_status": _stats["status"],
+        "uptime": f"{uptime//3600}h {(uptime%3600)//60}m",
+        "boosts_farmed": _stats["boosts_count"]
+    })
 
 async def main():
-    """Run both HTTP server and bot loop"""
-    log("=" * 60)
-    log("🚀 RENDER BOT STARTING")
-    log("=" * 60)
+    # START SERVER FIRST
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    log(f"📡 Render Health server live on port {PORT}")
     
-    await start_http_server()
+    # RUN BOT
     await bot_loop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
