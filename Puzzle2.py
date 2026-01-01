@@ -1,4 +1,3 @@
-# save as: royal_bot_termux.py
 import json
 import hashlib
 import asyncio
@@ -9,23 +8,27 @@ import os
 from datetime import datetime, timezone
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
+from aiohttp import web
 
 # ================= HARDCODED CONFIG =================
 
-JSON_URL = "https://gist.githubusercontent.com/gamerz6306740-byte/378cc13bad4dd2bdf88f465f4b0302e2/raw/bdf5dbcd1188d0035f28d29099f035ea481a1911/Aunaj.json"
+JSON_URL = "https://gist.githubusercontent.com/a75446775-byte/c90feb5fb0d1d7cee1345d78c100d0e0/raw/ab4db7d72959f887e23ebb8780258bda912caba8/Ad.json"
 
-FIREBASE_KEY = "AIzaSyCF-M9WFi6IsTIn7G3hzG_nIi3rWA3XD6o"
-PROJECT_ID = "puzzle-master-51426"
+FIREBASE_KEY = "AIzaSyAkSwrPZkuDYUGWU65NAVtbidYzE5ydIJ4"
+PROJECT_ID = "cash-rhino"
 
-REFRESH_TOKEN = "AMf-vBxZSp-F_J8N04NaVKKC4Ubo5hXnrElz87iNxVNRV9MxhLRkarCPdaNTcBBYYFl5o0ys9HVOMn5AcX7IXRJhUvfWOzoZCUVa1d8bWzTPxOrv0-mccMNxPKxDc-E6_aUTgtE33TyuEhUtM_Z2gzp3B5Ik8VUDkJhqW1RF1xfuj1gIdIE5yUi5tjyobxR2SWTSGVNKn0SDpNY0RlqA_3I0551ZOmwRPYdDSQlH2RdWsGLy1VcNUwPrUsT9KkSDwHLkC-5KLGp9mEYdZENvh1Fi7_8RbvgGvzqs0691hANYxfUBAiS4C_SzDjigTdNi9s-4K3wwcho2qa9ERoo6y4dQHL99R0f08a48IB7NDsUtTX7WS4oxDsFdUmCOnVIhUKWRSCBjK407nKkKbE5aAjnBKjKdyey_J8FtsyGAEYRhiXgVWfu7Dkwacxu9D70Mznh17hNe34Nb"
+REFRESH_TOKEN = (
+    "AMf-vByShuybtTRFrS35tBsiejnoFbyvCgZFRIXiSVbd_VVAS9br0GRYC0rlZF2bodGPsn-gJwpbFAA3pZ96h6xPUW9WV49uOIWnchn-ca7DcBJIGg3HvaQ-jWVQmcLs6FKiFgJ_B5Uwirv5VkBV-SScFX4uY9VMAJdlRwXewI6CxmI1-xYosj-d8aPHq_PAPwdgtTG6AMJOGFdFGf4YEetR5DMoeLl8H4Pmf_adVVSIr8pk1S-1gNlmvcaRQP7J0GZa0MzBFRk7mVok1kBABLRjVn0cru3Vxe38xOcVW-YRhBzL-uZRK5WFnCXTnRShDoEGuS_reOu9vkDRT4DCMz4PInrPtnG_z0Rmi-EESdXN2oXRhLuIei2r7gs2ZYsJAPUZNZr38z9DbNWNPpCo21FJNks0jspYCAdfctc74vZgwZmdWUmz2j5_xImoGUgLT7Oe5Si90NWH"
+)
 
 BASE_URL = "https://fairbid.inner-active.mobi/simpleM2M/fyberMediation"
-SPOT_ID = "2052855"
+SPOT_ID = "2555632"
 SALT = "j8n5HxYA0ZVF"
 
 ENCRYPTION_KEY = "6fbJwIfT6ibAkZo1VVKlKVl8M2Vb7GSs"
 
 REQUEST_TIMEOUT = 30
+PORT = int(os.getenv("PORT", 10000))
 
 # ====================================================
 
@@ -42,6 +45,29 @@ def log(msg: str):
     timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{timestamp}] {msg}", flush=True)
 
+# ---------------- HTTP SERVER (Keep-Alive) ---------------- #
+
+async def health_check(request):
+    uptime = int(time.time() - _stats["start_time"])
+    hours = uptime // 3600
+    minutes = (uptime % 3600) // 60
+    
+    return web.json_response({
+        "status": "running",
+        "uptime": f"{hours}h {minutes}m"
+    })
+
+async def start_http_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    app.router.add_get("/health", health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    log(f"[HTTP] Health check server running on port {PORT}")
+
 # ---------------- CLIENT ---------------- #
 
 async def create_client():
@@ -52,7 +78,7 @@ async def create_client():
             "Accept": "application/json",
         },
         timeout=httpx.Timeout(REQUEST_TIMEOUT),
-        # ⚠️ Removed verify=False for security (Termux handles certs fine)
+        verify=False,
     )
 
 # ---------------- LOAD CONFIG FROM URL ---------------- #
@@ -79,7 +105,7 @@ async def load_config(client):
 
 async def get_id_token(client):
     r = await client.post(
-        f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_KEY}",  # 🔧 Fixed space issue
+        f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_KEY}",
         data={
             "grant_type": "refresh_token",
             "refresh_token": REFRESH_TOKEN
@@ -139,7 +165,8 @@ def encrypt_offer(offer_id):
 async def get_super_offer(client, token, uid):
     try:
         r = await client.post(
-            f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/users/{uid}:runQuery",  # 🔧 Fixed space
+            f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
+            f"/databases/(default)/documents/users/{uid}:runQuery",
             headers={"Authorization": f"Bearer {token}"},
             json={
                 "structuredQuery": {
@@ -155,7 +182,7 @@ async def get_super_offer(client, token, uid):
                 }
             }
         )
-        r.raise_for_status()
+
         for item in r.json():
             doc = item.get("document")
             if not doc:
@@ -180,9 +207,11 @@ async def get_super_offer(client, token, uid):
 async def get_boosts(client, token, uid):
     try:
         r = await client.get(
-            f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/users/{uid}?mask.fieldPaths=boosts",  # 🔧 Fixed space
+            f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
+            f"/databases/(default)/documents/users/{uid}?mask.fieldPaths=boosts",
             headers={"Authorization": f"Bearer {token}"}
         )
+
         if r.status_code != 200:
             return 0
 
@@ -201,7 +230,6 @@ async def run_fairbid(client, cfg):
     try:
         r = await client.post(f"{BASE_URL}?spotId={SPOT_ID}", content=cfg["payload"])
         if r.status_code >= 400:
-            log(f"[FAIRBID] Failed request: {r.status_code}")
             return
 
         text = r.text
@@ -214,8 +242,8 @@ async def run_fairbid(client, cfg):
                     impression_url = parts[1].split('"')[0]
                     if impression_url.startswith('http'):
                         await client.get(impression_url)
-        except Exception as e:
-            log(f"[IMPRESSION] Error: {e}")
+        except Exception:
+            pass
         
         # Parse completion URL
         try:
@@ -225,11 +253,11 @@ async def run_fairbid(client, cfg):
                     comp = parts[1].split('"')[0]
                     if comp.startswith('http'):
                         await client.post(comp, content=build_hash_payload(cfg["user_id"], comp))
-        except Exception as e:
-            log(f"[COMPLETION] Error: {e}")
+        except Exception:
+            pass
             
-    except Exception as e:
-        log(f"[FAIRBID] Exception: {e}")
+    except Exception:
+        pass
 
 # ---------------- UNLOCK / CLAIM ---------------- #
 
@@ -240,37 +268,30 @@ async def call_fn(client, token, name, offer_id):
             headers={"Authorization": f"Bearer {token}"},
             json=encrypt_offer(offer_id)
         )
-        r.raise_for_status()
         return r.json()
-    except Exception as e:
-        log(f"[FN CALL] Error in {name}: {e}")
+    except Exception:
         return {}
 
 async def unlock_and_claim(client, token, offer):
     unlock = await call_fn(client, token, "superOffer_unlock", offer["offerId"])
     if unlock.get("result", {}).get("status") != "SUCCESS":
-        log(f"[UNLOCK] Failed: {unlock}")
         return False
 
     claim = await call_fn(client, token, "superOffer_claim", offer["offerId"])
-    success = claim.get("result", {}).get("status") == "SUCCESS"
-    if not success:
-        log(f"[CLAIM] Failed: {claim}")
-    return success
+    return claim.get("result", {}).get("status") == "SUCCESS"
 
 # ---------------- MAIN LOOP ---------------- #
 
 async def bot_loop():
-    """Main bot logic — Termux-friendly (no web server)"""
+    """Main bot logic"""
     client = await create_client()
     
     try:
         cfg = await load_config(client)
         tm = TokenManager()
 
-        log("[BOT] 🚀 Starting Royal Cash Bot (Termux Edition)")
+        log("[BOT] Starting optimized async bot with HTTP/2 and encryption")
         log(f"[BOT] User ID: {cfg['user_id']}")
-        log("=" * 60)
 
         while True:
             try:
@@ -281,35 +302,28 @@ async def bot_loop():
                     await asyncio.sleep(5)
                     continue
 
-                log(f"[OFFER] 🔍 Found offer {offer['offerId']} | Reward: {offer['reward']} | Fees: {offer['fees']}")
+                log(f"[OFFER] Found offer {offer['offerId']} - Reward: {offer['reward']}, Fees: {offer['fees']}")
                 
                 target = offer["fees"] + 1
-                boosts = 0
 
-                while boosts < target:
+                while True:
                     boosts = await get_boosts(client, token, uid)
                     if boosts >= target:
                         break
-                    log(f"[BOOST] Current: {boosts} → Need: {target} → Running ad...")
                     await run_fairbid(client, cfg)
-                    await asyncio.sleep(0.5)  # Slight delay to avoid hammering
-
-                log(f"[BOOST] ✅ Reached {boosts} boosts. Unlocking offer...")
+                    await asyncio.sleep(0.3)
 
                 if await unlock_and_claim(client, token, offer):
                     log(
                         f"✅ [CLAIMED] Offer: {offer['offerId']} "
-                        f"| Reward: {offer['reward']} coins | Fees: {offer['fees']}"
+                        f"| Reward: {offer['reward']} | Fees: {offer['fees']}"
                     )
                 else:
                     log(f"❌ [FAILED] Could not claim offer {offer['offerId']}")
 
                 _processed_offers.add(offer["offerId"])
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
 
-            except KeyboardInterrupt:
-                log("🛑 Bot stopped by user.")
-                break
             except Exception as e:
                 log(f"[ERROR] Bot loop error: {e}")
                 await asyncio.sleep(10)
@@ -319,19 +333,15 @@ async def bot_loop():
         raise
     finally:
         await client.aclose()
-        log("[BOT] Client closed. Goodbye!")
 
-# ---------------- ENTRY POINT ---------------- #
-
-def main():
+async def main():
+    """Run both HTTP server and bot loop"""
     log("=" * 60)
-    log("📱 Royal Cash Bot — Termux Edition")
-    log("📌 Press Ctrl+C to stop.")
+    log("🚀 RENDER BOT STARTING")
     log("=" * 60)
-    try:
-        asyncio.run(bot_loop())
-    except KeyboardInterrupt:
-        print("\n👋 Bot exited cleanly.")
+    
+    await start_http_server()
+    await bot_loop()
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main())
