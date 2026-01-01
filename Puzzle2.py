@@ -12,7 +12,7 @@ from aiohttp import web
 
 # ================= HARDCODED CONFIG =================
 
-JSON_URL = "https://gist.githubusercontent.com/a75446775-byte/c90feb5fb0d1d7cee1345d78c100d0e0/raw/ab4db7d72959f887e23ebb8780258bda912caba8/Ad.json"
+JSON_URL = "https://gist.githubusercontent.com/a94154858/b60b9dea6eab34ef1e87f069282dcf95/raw/07f0ed705ed98b8bb5331f897c717e9cca9b7c80/Ali.json"
 
 FIREBASE_KEY = "AIzaSyAkSwrPZkuDYUGWU65NAVtbidYzE5ydIJ4"
 PROJECT_ID = "cash-rhino"
